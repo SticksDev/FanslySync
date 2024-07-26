@@ -36,6 +36,10 @@ jobs:
         with:
           toolchain: stable
 
+      # Change workdir to the `src-tauri` directory
+      - name: Change workdir
+        run: cd src-tauri
+
       # we run our rust tests before the webdriver tests to avoid testing a broken application
       - name: Cargo test
         uses: actions-rs/cargo@v1
