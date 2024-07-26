@@ -36,19 +36,10 @@ jobs:
         with:
           toolchain: stable
 
-      # Change workdir to the `src-tauri` directory
-      - name: Change workdir
-        run: cd src-tauri
+      # Run our cargo commands in `src-tauri` directory
+      - name: Build And Test
+        run: >-
+          cd src-tauri &&
+          cargo test &&
+          cargo build --release
 
-      # we run our rust tests before the webdriver tests to avoid testing a broken application
-      - name: Cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-
-      # build a release build of our application to be used during our WebdriverIO tests
-      - name: Cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
