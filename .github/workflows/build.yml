@@ -1,0 +1,50 @@
+# run this action when the repository is pushed to
+on: [push]
+
+# the name of our workflow
+name: FanslySync Build & Test
+
+jobs:
+  # a single job named test
+  test:
+    # the display name of the test job
+    name: FanslySync Test Runner
+
+    # we want to run on the latest linux environment
+    runs-on: ubuntu-latest
+
+    # the steps our job runs **in order**
+    steps:
+      # checkout the code on the workflow runner
+      - uses: actions/checkout@v2
+
+      # install system dependencies that Tauri needs to compile on Linux.
+      # note the extra dependencies for `tauri-driver` to run which are: `webkit2gtk-driver` and `xvfb`
+      - name: Tauri dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          libgtk-3-dev
+          libayatana-appindicator3-dev
+          libwebkit2gtk-4.0-dev
+          webkit2gtk-driver
+          xvfb
+
+      # install the latest Rust stable
+      - name: Rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      # we run our rust tests before the webdriver tests to avoid testing a broken application
+      - name: Cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+
+      # build a release build of our application to be used during our WebdriverIO tests
+      - name: Cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
