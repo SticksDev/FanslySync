@@ -47,8 +47,11 @@
 		loadingSync = false;
 
 		const updateStatus = await checkUpdate();
-		upToDate = updateStatus.shouldUpdate;
+		upToDate = !updateStatus.shouldUpdate;
 		updateMeta = updateStatus.manifest || null;
+		console.log('[updateStatus]', updateStatus);
+		console.log('[upToDate]', upToDate);
+		console.log('[updateMeta]', updateMeta);
 
 		versionData.appVersion = await getVersion();
 		versionData.tauriVersion = await getTauriVersion();
