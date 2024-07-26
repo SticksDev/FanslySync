@@ -10,6 +10,7 @@ export type Config = {
 export interface SyncData {
 	followers: Follower[];
 	subscribers: Subscriber[];
+	sync_data_url: string;
 }
 
 interface Subscriber {

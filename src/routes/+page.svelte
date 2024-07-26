@@ -52,8 +52,6 @@
 		}
 
 		status = 'Initialization complete!';
-		// Wait 1000ms before redirecting to /setup or /home
-		await new Promise((resolve) => setTimeout(resolve, 1000));
 
 		if (config.is_first_run) {
 			// Navigate to /setup

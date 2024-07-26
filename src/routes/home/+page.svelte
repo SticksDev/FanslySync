@@ -7,14 +7,23 @@
 	import { slide } from 'svelte/transition';
 	import { sendNotification } from '@tauri-apps/api/notification';
 	import { platform } from '@tauri-apps/api/os';
+	import { checkUpdate, installUpdate, type UpdateManifest } from '@tauri-apps/api/updater';
+	import { getVersion, getTauriVersion } from '@tauri-apps/api/app';
+	import { ask } from '@tauri-apps/api/dialog';
 
 	let loadingSync = true;
-	let syncing = false;
+	let upToDate: boolean | null = null;
+	let updateMeta: UpdateManifest | null = null;
+	let versionData = {
+		appVersion: 'Loading...',
+		tauriVersion: 'Loading...'
+	};
 	let syncState = {
 		show: false,
 		syncing: false,
 		error: false,
 		success: false,
+		url: '',
 		message: ''
 	};
 
@@ -36,6 +45,13 @@
 
 		config = configData;
 		loadingSync = false;
+
+		const updateStatus = await checkUpdate();
+		upToDate = updateStatus.shouldUpdate;
+		updateMeta = updateStatus.manifest || null;
+
+		versionData.appVersion = await getVersion();
+		versionData.tauriVersion = await getTauriVersion();
 	});
 
 	async function syncNow() {
@@ -53,6 +69,8 @@
 			syncState.message = syncError ?? 'Sync data was null';
 			return;
 		}
+
+		syncState.url = syncData.sync_data_url;
 
 		// Return the last sync as unix timestamp
 		config!.last_sync = Date.now();
@@ -88,6 +106,24 @@
 			sound: soundName
 		});
 	}
+
+	async function doUpdate() {
+		const confirm = await ask(
+			`An update is available for FanslySync. Would you like to update now?\n\nCurrent version: ${versionData.appVersion}\nNew (remote) version: ${updateMeta?.version ?? 'Unknown'}`,
+			{
+				title: 'Update Available',
+				okLabel: 'Yes',
+				cancelLabel: 'No',
+				type: 'info'
+			}
+		);
+
+		if (confirm) {
+			await installUpdate();
+		} else {
+			console.log('User declined update');
+		}
+	}
 </script>
 
 <div class="container bg-zinc-800 w-screen h-screen">
@@ -96,7 +132,20 @@
 		<div class="flex items-center">
 			<img src="/fanslySync.png" alt="FanslySynct" class="w-8 h-8" />
 			<h1 class="text-2xl font-bold text-gray-200 ml-2">FanslySync</h1>
-			<span class="text-gray-400 ml-2">v0.1.0</span>
+			<span class="text-gray-400 ml-2"
+				>v{versionData.appVersion} (runtime: {versionData.tauriVersion})</span
+			>
+			{#if upToDate === false}
+				<button
+					type="button"
+					class="text-red-500 ml-2 hover:text-red-600 duration-200"
+					on:click={doUpdate}
+				>
+					Update available!
+				</button>
+			{:else if upToDate === true}
+				<span class="text-green-500 ml-2">Up to date!</span>
+			{/if}
 		</div>
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
@@ -250,7 +299,7 @@
 					<div class="flex flex-col">
 						<h1 class="text-lg font-bold">Sync Successful!</h1>
 						<p class="text-sm">
-							Data synced successfully. Please run the import with the following link {syncState.message}
+							Data synced successfully. Please run the import with the following link {syncState.url}
 							to import the data.
 						</p>
 					</div>
@@ -260,7 +309,7 @@
 						<button
 							class="bg-white text-blue-600 px-2 py-1 rounded-lg"
 							on:click={() => {
-								clipboard.writeText(syncState.message);
+								clipboard.writeText(syncState.url);
 							}}
 						>
 							Copy

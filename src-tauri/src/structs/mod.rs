@@ -5,6 +5,7 @@ use serde_json::Value;
 pub struct SyncDataResponse {
     pub followers: Vec<FanslyFollowersResponse>,
     pub subscribers: Vec<Subscription>,
+    pub sync_data_url: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

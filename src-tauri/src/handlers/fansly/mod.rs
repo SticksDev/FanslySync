@@ -162,6 +162,35 @@ impl Fansly {
         Ok(subscriptions.response.subscriptions)
     }
 
+    async fn upload_sync_data(&self, data: SyncDataResponse) -> Result<String, reqwest::Error> {
+        let url = "https://paste.hep.gg/documents";
+
+        // Set our content type to application/json
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+
+        let response = self
+            .client
+            .post(url)
+            .headers(headers)
+            .json(&data)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            eprintln!("[sync::process::upload_sync_data] Failed to upload sync data.");
+            return Err(response.error_for_status().unwrap_err());
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        let key = json["key"].as_str().unwrap();
+
+        Ok(format!("https://paste.hep.gg/{}", key))
+    }
+
     pub async fn sync(&self) -> Result<SyncDataResponse, String> {
         // Fetch profile
         println!("[sync::process] Fetching profile...");
@@ -244,11 +273,23 @@ impl Fansly {
         );
 
         println!("[sync::process] Sync complete.");
+        println!("[sync::process] Uploading sync data to paste.hep.gg for processing...");
+
+        // Upload sync data to paste.hep.gg
+        let paste_url = self
+            .upload_sync_data(SyncDataResponse {
+                followers: followers.clone(),
+                subscribers: subscribers.clone(),
+                sync_data_url: "".to_string(),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Return JSON of what we fetched
         Ok(SyncDataResponse {
             followers,
             subscribers,
+            sync_data_url: paste_url,
         })
     }
 }

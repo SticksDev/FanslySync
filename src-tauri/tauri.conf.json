@@ -7,8 +7,8 @@
 		"distDir": "../build"
 	},
 	"package": {
-		"productName": "fanslysync-desktop",
-		"version": "0.1.0"
+		"productName": "FanslySync",
+		"version": "0.1.1"
 	},
 	"tauri": {
 		"allowlist": {
@@ -29,6 +29,9 @@
 				"all": true
 			},
 			"os": {
+				"all": true
+			},
+			"app": {
 				"all": true
 			}
 		},
