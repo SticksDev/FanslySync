@@ -9,23 +9,23 @@
 		fanslyToken: ''
 	};
 
-	import { invoke } from '@tauri-apps/api/tauri';
-	import { dialog, clipboard } from '@tauri-apps/api';
+	import { invoke } from '@tauri-apps/api/core';
+	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+	import { message } from '@tauri-apps/plugin-dialog';
 	import { awaiter } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import type { AccountInfo, Config } from '$lib/types';
-	import NoWorkResult from 'postcss/lib/no-work-result';
 
 	onMount(async () => {
 		const [config, configError] = await awaiter(invoke('get_config'));
 
 		if (configError) {
-			await dialog.message(
+			await message(
 				`Something went wrong while getting the configuration. We've copied the error to your clipboard. Please report this issue on GitHub.\n\nError: ${configError}\n\nThe application will now close.`,
-				{ title: 'BambuConnect | Configuration Error', type: 'error' }
+				{ title: 'BambuConnect | Configuration Error', kind: 'error' }
 			);
 
-			await clipboard.writeText(configError);
+			await writeText(configError);
 			invoke('quit', { code: 1 });
 			return;
 		}
@@ -37,12 +37,12 @@
 		const [config, configError] = (await awaiter(invoke('get_config'))) as [Config, any | null];
 
 		if (configError) {
-			await dialog.message(
+			await message(
 				`Something went wrong while getting the configuration. We've copied the error to your clipboard. Please report this issue on GitHub.\n\nError: ${configError}\n\nThe application will now close.`,
-				{ title: 'BambuConnect | Configuration Error', type: 'error' }
+				{ title: 'BambuConnect | Configuration Error', kind: 'error' }
 			);
 
-			await clipboard.writeText(configError);
+			await writeText(configError);
 			invoke('quit', { code: 1 });
 			return;
 		}

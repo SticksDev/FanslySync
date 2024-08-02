@@ -1,23 +1,33 @@
 <script lang="ts">
-	let status = 'Initializing...';
-	import { invoke } from '@tauri-apps/api/tauri';
-	import { dialog, clipboard } from '@tauri-apps/api';
+	import { info, error } from '@tauri-apps/plugin-log';
+	import { invoke } from '@tauri-apps/api/core';
+	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+	import { message } from '@tauri-apps/plugin-dialog';
 	import { awaiter } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import type { Config } from '$lib/types';
-	import { isPermissionGranted, requestPermission } from '@tauri-apps/api/notification';
+	import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
+
+	let status = 'Initializing...';
+	info(
+		`[FanslySync::init] Marking beginning of initialization and logfile session. Current time: ${new Date().toISOString()}`
+	);
 
 	onMount(async () => {
+		info(`[FanslySync::init] onMount() called. Starting initialization...`);
+		info(`[FanslySync::init] Initializing configuration...`);
 		const [_, configInitError] = await awaiter(invoke('init_config'));
 
 		if (configInitError) {
+			error(`[FanslySync::init] Failed to initialize configuration. Error: ${configInitError}`);
+			error(`[FanslySync::init] Initialization failed due to configuration error. Exiting...`);
 			status = 'Failed to initialize configuration';
-			await dialog.message(
+			await message(
 				`Something went wrong while initializing the configuration. We've copied the error to your clipboard. Please contact us.\n\nError: ${configInitError}\n\nThe application will now close.`,
-				{ title: 'FanslySync | Initialization Error', type: 'error' }
+				{ title: 'FanslySync | Initialization Error', kind: 'error' }
 			);
 
-			await clipboard.writeText(configInitError);
+			await writeText(configInitError);
 			invoke('quit', { code: 1 });
 			return;
 		}
@@ -25,25 +35,39 @@
 		const [config, configError] = await awaiter(invoke('get_config') as Promise<Config>);
 
 		if (configError || !config || config === null) {
+			error(
+				`[FanslySync::init] Failed to get configuration. Error: ${configError ?? 'Config was null'}`
+			);
 			status = 'Failed to get configuration';
-			await dialog.message(
+			await message(
 				`Something went wrong while getting the configuration. We've copied the error to your clipboard. Please contact us.\n\nError: ${configError ?? 'Config was null'}\n\nThe application will now close.`,
-				{ title: 'FanslySync | Configuration Error', type: 'error' }
+				{ title: 'FanslySync | Configuration Error', kind: 'error' }
 			);
 
-			await clipboard.writeText(configError);
+			await writeText(configError);
 			invoke('quit', { code: 1 });
 			return;
 		}
 
+		info(
+			`[FanslySync::init] Configuration initialized successfully. Checking notification permissions...`
+		);
+
 		const permissionGranted = await isPermissionGranted();
 		if (!permissionGranted) {
+			info(`[FanslySync::init] Notification permissions not granted. Requesting permission...`);
 			let result = await requestPermission();
 			if (result !== 'granted') {
+				error(
+					`[FanslySync::init] Notification permission denied but we require it to function properly.`
+				);
+				error(
+					`[FanslySync::init] Initialization failed due to notification permission error. Exiting...`
+				);
 				status = 'Notification permission denied';
-				await dialog.message(
+				await message(
 					`FanslySync requires notification permissions to function properly. Please enable notifications and restart the application.`,
-					{ title: 'FanslySync | Notification Permission Error', type: 'error' }
+					{ title: 'FanslySync | Notification Permission Error', kind: 'error' }
 				);
 
 				invoke('quit', { code: 1 });
@@ -51,14 +75,19 @@
 			}
 		}
 
+		info(`[FanslySync::init] Notification permissions granted. Checking if first run...`);
 		status = 'Initialization complete!';
 
 		if (config.is_first_run) {
+			info(`[FanslySync::init] First run detected. Redirecting to /setup...`);
 			// Navigate to /setup
 			window.location.href = '/setup';
 		} else {
 			// todo: set jwt for future requests
+			info(`[FanslySync::init] Not first run. Setting Fansly token...`);
 			await invoke('fansly_set_token', { token: config.fansly_token });
+			info(`[FanslySync::init] Fansly token set.`);
+			info(`[FanslySync::init] Initialization complete. Redirecting to /home...`);
 			window.location.href = '/home';
 		}
 	});

@@ -99,7 +99,9 @@ impl Fansly {
         );
         headers.insert(
             reqwest::header::USER_AGENT,
-            "FanslySync/1.0.0 (tanner@teamhydra.dev)".parse().unwrap(),
+            "FanslySync/1.0.0 (tanner@fanslycreatorbot.com)"
+                .parse()
+                .unwrap(),
         );
 
         headers.insert(
@@ -137,7 +139,9 @@ impl Fansly {
         );
         headers.insert(
             reqwest::header::USER_AGENT,
-            "FanslySync/1.0.0 (sticks@teamhydra.dev)".parse().unwrap(),
+            "FanslySync/1.0.0 (tanner@fanslycreatorbot.com)"
+                .parse()
+                .unwrap(),
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,

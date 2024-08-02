@@ -1,19 +1,20 @@
 <script lang="ts">
-	import { invoke } from '@tauri-apps/api/tauri';
+	import { info, error } from '@tauri-apps/plugin-log';
 	import { awaiter } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import type { Config, SyncData } from '$lib/types';
-	import { clipboard, dialog } from '@tauri-apps/api';
 	import { slide } from 'svelte/transition';
-	import { sendNotification } from '@tauri-apps/api/notification';
-	import { platform } from '@tauri-apps/api/os';
-	import { checkUpdate, installUpdate, type UpdateManifest } from '@tauri-apps/api/updater';
+	import { sendNotification } from '@tauri-apps/plugin-notification';
+	import { platform } from '@tauri-apps/plugin-os';
+	import { check, Update } from '@tauri-apps/plugin-updater';
 	import { getVersion, getTauriVersion } from '@tauri-apps/api/app';
-	import { ask } from '@tauri-apps/api/dialog';
+	import { invoke } from '@tauri-apps/api/core';
+	import { ask, message } from '@tauri-apps/plugin-dialog';
+	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 	let loadingSync = true;
 	let upToDate: boolean | null = null;
-	let updateMeta: UpdateManifest | null = null;
+	let updateData: Update | null = null;
 	let versionData = {
 		appVersion: 'Loading...',
 		tauriVersion: 'Loading...'
@@ -30,34 +31,53 @@
 	let config: Config | null = null;
 
 	onMount(async () => {
+		info(`[FanslySync::page_init:home] onMount() called. Starting page initialization...`);
 		const [configData, configError] = await awaiter(invoke('get_config') as Promise<Config>);
 
 		if (configError || !configData) {
-			await dialog.message(
+			error(
+				`[FanslySync::page_init:home] Failed to get configuration. Error: ${configError ?? 'Config was null'}`
+			);
+			info(
+				`[FanslySync::page_init:home] Page Initialization failed due to configuration error. Exiting...`
+			);
+			await message(
 				`Something went wrong while getting the configuration. We've copied the error to your clipboard. Please report this issue on GitHub.\n\nError: ${configError ?? 'Config was null'}\n\nThe application will now close.`,
-				{ title: 'FanslySync | Configuration Error', type: 'error' }
+				{ title: 'FanslySync | Configuration Error', kind: 'error' }
 			);
 
-			await clipboard.writeText(configError);
+			await writeText(configError);
 			invoke('quit', { code: 1 });
 			return;
 		}
 
+		info(
+			`[FanslySync::page_init:home] Configuration initialized successfully. Checking for updates...`
+		);
 		config = configData;
 		loadingSync = false;
 
-		const updateStatus = await checkUpdate();
-		upToDate = !updateStatus.shouldUpdate;
-		updateMeta = updateStatus.manifest || null;
-		console.log('[updateStatus]', updateStatus);
-		console.log('[upToDate]', upToDate);
-		console.log('[updateMeta]', updateMeta);
+		const updateStatus = await check();
+		upToDate = !updateStatus?.available ?? false;
+		updateData = updateStatus;
+		info(
+			`[FanslySync::page_init:home] Update check completed. Up to date: ${upToDate}, Update data: ${updateData}`
+		);
+		info(`[FanslySync::page_init:home] Getting app and Tauri versions...`);
 
 		versionData.appVersion = await getVersion();
 		versionData.tauriVersion = await getTauriVersion();
+
+		info(
+			`[FanslySync::page_init:home] App and Tauri versions fetched. We are running App version: ${versionData.appVersion}, atop Tauri version: ${versionData.tauriVersion}`
+		);
+
+		info(`[FanslySync::page_init:home] Page initialization completed successfully.`);
 	});
 
 	async function syncNow() {
+		info(`[FanslySync::syncNow] Starting manual sync...`);
+
 		syncState.error = false;
 		syncState.success = false;
 		syncState.syncing = true;
@@ -67,6 +87,9 @@
 		console.log(syncData, syncError);
 
 		if (syncError || syncData === null) {
+			error(
+				`[FanslySync::syncNow] Failed to sync data. Error: ${syncError ?? 'Sync data was null'}`
+			);
 			syncState.syncing = false;
 			syncState.error = true;
 			syncState.message = syncError ?? 'Sync data was null';
@@ -83,6 +106,7 @@
 			invoke('save_config', { config }) as Promise<boolean>
 		);
 		if (saveConfigError) {
+			error(`[FanslySync::syncNow] Failed to save config data. Error: ${saveConfigError}`);
 			syncState.syncing = false;
 			syncState.error = true;
 			syncState.message = saveConfigError ?? 'Save config data was null';
@@ -92,12 +116,12 @@
 		syncState.syncing = false;
 		syncState.success = true;
 
-		const platformName = await platform();
+		const platformName = platform();
 		let soundName;
 
-		if (platformName === 'win32') {
+		if (platformName === 'windows') {
 			soundName = 'ms-winsoundevent:Notification.Default';
-		} else if (platformName === 'darwin') {
+		} else if (platformName === 'macos') {
 			soundName = 'Ping';
 		} else {
 			soundName = 'completion-sucess';
@@ -108,21 +132,32 @@
 			body: 'Data synced successfully. Please look at the app for more details.',
 			sound: soundName
 		});
+
+		info(`[FanslySync::syncNow] Manual sync completed successfully.`);
 	}
 
 	async function doUpdate() {
+		if (!updateData || !updateData.available) {
+			message('You are up to date! Current version: ' + versionData.appVersion, {
+				title: 'FanslySync | Update',
+				kind: 'info'
+			});
+			return;
+		}
+
 		const confirm = await ask(
-			`An update is available for FanslySync. Would you like to update now?\n\nCurrent version: ${versionData.appVersion}\nNew (remote) version: ${updateMeta?.version ?? 'Unknown'}`,
+			`An update is available for FanslySync. Would you like to update now?\n\nCurrent version: ${versionData.appVersion}\nNew (remote) version: ${updateData?.version ?? 'Unknown'}\n\nThe application will close after the update completes.`,
 			{
 				title: 'Update Available',
 				okLabel: 'Yes',
 				cancelLabel: 'No',
-				type: 'info'
+				kind: 'info'
 			}
 		);
 
 		if (confirm) {
-			await installUpdate();
+			await updateData.downloadAndInstall();
+			await invoke('quit', { code: 0 });
 		} else {
 			console.log('User declined update');
 		}
@@ -312,7 +347,7 @@
 						<button
 							class="bg-white text-blue-600 px-2 py-1 rounded-lg"
 							on:click={() => {
-								clipboard.writeText(syncState.url);
+								writeText(syncState.url);
 							}}
 						>
 							Copy
