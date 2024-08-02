@@ -1,38 +1,33 @@
-# create-svelte
+<div align="center">
+<h1>FanslySync</h1>
 
-Everything you need to build a Svelte project, powered by [`create-svelte`](https://github.com/sveltejs/kit/tree/main/packages/create-svelte).
+A simple tool to sync your fansly data with 3rd party services, securely.
 
-## Creating a project
+</div>
 
-If you're seeing this, you've probably already done this step. Congrats!
+## About
 
-```bash
-# create a new project in the current directory
-npm create svelte@latest
+FanslySync was created for the [Fansly Creator Bot](https://fanslycreatorbot.com) project to securely sync Fansly data with our service and others. We wanted to create a tool that would allow creators to sync their data with our service without having to give us their Fansly credentials. This tool is open source and can be used by anyone to sync their Fansly data with any service they want -- not just ours.
 
-# create a new project in my-app
-npm create svelte@latest my-app
-```
+## How it works
 
-## Developing
+We use your Fansly API key to sync your data with our service. This way, you don't have to give us your Fansly credentials. While it does provide the same access to your data as your credentials would, it's a more secure way to sync your data. **Your API key is never stored outside of your own computer.**
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+## Getting Started & Installation
 
-```bash
-npm run dev
+We have a documentation page that explains how to get started with FanslySync. You can find it [here](https://docs.fanslycreatorbot.com/docs/for-creators/sync).
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+If you aren't using Fansly Creator Bot, you can ignore the parts about setting up the bot and just follow the FanslySync installation instructions.
 
-## Building
 
-To create a production version of your app:
+## License
 
-```bash
-npm run build
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-You can preview the production build with `npm run preview`.
+## Contributing
 
-> To deploy your app, you may need to install an [adapter](https://kit.svelte.dev/docs/adapters) for your target environment.
+Contributions are welcome! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) file for more information.
+
+## For Developers
+
+If you are a 3rd party service that wants to integrate with FanslySync, please read our [DEVELOPERS.md](DEVELOPERS.md) file for more information.
