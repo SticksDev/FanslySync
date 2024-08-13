@@ -3,7 +3,7 @@
 	import { awaiter } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import type { Config, SyncData } from '$lib/types';
-	import { slide } from 'svelte/transition';
+	import { fade, fly, slide } from 'svelte/transition';
 	import { sendNotification } from '@tauri-apps/plugin-notification';
 	import { platform } from '@tauri-apps/plugin-os';
 	import { check, Update } from '@tauri-apps/plugin-updater';
@@ -11,6 +11,8 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { ask, message } from '@tauri-apps/plugin-dialog';
 	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+	import { isEnabled, enable } from '@tauri-apps/plugin-autostart';
+	import { toast } from 'svelte-french-toast';
 
 	let loadingSync = true;
 	let upToDate: boolean | null = null;
@@ -28,7 +30,20 @@
 		message: ''
 	};
 
+	let isAutoSyncConfigModalOpen = false;
+	let canSave = false;
 	let config: Config | null = null;
+	let syncInterval: number | null = null;
+
+	let autoSyncConfig = {
+		interval: 0,
+		syncToken: ''
+	};
+
+	let autoSyncConfigState = {
+		validatingToken: false,
+		tokenValid: false
+	};
 
 	onMount(async () => {
 		info(`[FanslySync::page_init:home] onMount() called. Starting page initialization...`);
@@ -55,6 +70,8 @@
 			`[FanslySync::page_init:home] Configuration initialized successfully. Checking for updates...`
 		);
 		config = configData;
+		autoSyncConfig.interval = config.sync_interval;
+		autoSyncConfig.syncToken = config.sync_token;
 		loadingSync = false;
 
 		const updateStatus = await check();
@@ -72,19 +89,80 @@
 			`[FanslySync::page_init:home] App and Tauri versions fetched. We are running App version: ${versionData.appVersion}, atop Tauri version: ${versionData.tauriVersion}`
 		);
 
+		info(`[FanslySync::page_init:home] Setting up autosync interval...`);
+		syncInterval = setInterval(
+			async () => {
+				if (config?.auto_sync_enabled) {
+					info(`[FanslySync::autoSyncProcess] Auto Sync enabled - syncing data automatically.`);
+					const nextIntervalTime = new Date(
+						Date.now() + (config?.sync_interval ?? 1) * 60 * 60 * 1000
+					);
+					const nextIntervalTimeString = nextIntervalTime.toLocaleTimeString();
+					const returnedData = await syncNow(true);
+					if (!returnedData || returnedData === null) {
+						error(`[FanslySync::autoSyncProcess] Failed to sync data automatically.`);
+
+						// Send error notification
+						await sendNotification({
+							title: 'FanslySync: Auto Sync Failed!',
+							body: `An error occurred while syncing data automatically. We will automatically retry at ${nextIntervalTimeString}.`
+						});
+					} else {
+						info(
+							`[FanslySync::autoSyncProcess] Synced data automatically - preparing to send to server.`
+						);
+
+						const [_, uploadErr] = await awaiter(
+							invoke('fansly_upload_auto_sync_data', {
+								token: config?.sync_token,
+								data: returnedData
+							})
+						);
+
+						if (uploadErr) {
+							error(
+								`[FanslySync::autoSyncProcess] Failed to upload data to server. Error: ${uploadErr}`
+							);
+
+							// Send error notification
+							await sendNotification({
+								title: 'FanslySync: Auto Sync Failed!',
+								body: `An error occurred while uploading data to the server. We will automatically retry at ${nextIntervalTimeString}.`
+							});
+
+							return;
+						}
+
+						// Send success notification
+						await sendNotification({
+							title: 'FanslySync: Auto Sync Successful!',
+							body: `Data synced and uploaded successfully. Next sync will occur at ${nextIntervalTimeString}.`
+						});
+					}
+				} else {
+					info(`[FanslySync::autoSyncProcess] Auto Sync disabled - skipping this sync.`);
+				}
+			},
+			(config?.sync_interval ?? 1) * 60 * 60 * 1000
+		);
+
+		info(`[FanslySync::page_init:home] Autosync interval set successfully.`);
 		info(`[FanslySync::page_init:home] Page initialization completed successfully.`);
 	});
 
-	async function syncNow() {
+	async function syncNow(auto: boolean = false) {
 		info(`[FanslySync::syncNow] Starting manual sync...`);
 
 		syncState.error = false;
 		syncState.success = false;
 		syncState.syncing = true;
-		syncState.show = true;
+		syncState.show = !auto;
 
-		const [syncData, syncError] = await awaiter(invoke('fansly_sync') as Promise<SyncData>);
-		console.log(syncData, syncError);
+		const [syncData, syncError] = await awaiter(
+			invoke('fansly_sync', {
+				auto
+			}) as Promise<SyncData>
+		);
 
 		if (syncError || syncData === null) {
 			error(
@@ -93,6 +171,13 @@
 			syncState.syncing = false;
 			syncState.error = true;
 			syncState.message = syncError ?? 'Sync data was null';
+
+			// Send failure notification
+			await sendNotification({
+				title: 'FanslySync: Sync Failed!',
+				body: 'An error occurred while syncing data. Please check the app for more details.'
+			});
+
 			return;
 		}
 
@@ -110,6 +195,12 @@
 			syncState.syncing = false;
 			syncState.error = true;
 			syncState.message = saveConfigError ?? 'Save config data was null';
+
+			// Send failure notification
+			await sendNotification({
+				title: 'FanslySync: Sync Failed!',
+				body: 'An error occurred while syncing data. Please check the app for more details.'
+			});
 			return;
 		}
 
@@ -127,13 +218,17 @@
 			soundName = 'completion-sucess';
 		}
 
-		await sendNotification({
-			title: 'FanslySync: Sync Successful!',
-			body: 'Data synced successfully. Please look at the app for more details.',
-			sound: soundName
-		});
+		if (!auto)
+			await sendNotification({
+				title: 'FanslySync: Sync Successful!',
+				body: 'Data synced successfully. Please look at the app for more details.',
+				sound: soundName
+			});
 
 		info(`[FanslySync::syncNow] Manual sync completed successfully.`);
+
+		if (auto) return syncData;
+		else return null;
 	}
 
 	async function doUpdate() {
@@ -162,13 +257,357 @@
 			console.log('User declined update');
 		}
 	}
+
+	async function enableAutoSync() {
+		const isAutoStartEnabled = await isEnabled();
+
+		if (!isAutoStartEnabled) {
+			// Required to enable autosync. Ask user for permission
+			const confirm = await ask(
+				`We've detected that FanslySync is not set to start automatically with the system. To enable Auto Sync, we need to enable this feature. Would you like to enable this feature now?`,
+				{
+					title: 'FanslySync | Enable Auto Start',
+					okLabel: 'Yes',
+					cancelLabel: 'No',
+					kind: 'warning'
+				}
+			);
+
+			if (!confirm) {
+				// Error out
+				await message(
+					`Auto Sync cannot be enabled without enabling the Auto Start feature. Please enable the Auto Start feature and try again.`,
+					{ title: 'FanslySync | Auto Sync Error', kind: 'error' }
+				);
+
+				return;
+			} else {
+				await toast.promise(enable(), {
+					loading: 'Enabling Auto Start...',
+					success: 'Auto Start enabled successfully.',
+					error: 'Failed to enable Auto Start. Please try again.'
+				});
+			}
+		}
+
+		// Ensure they have a sync token set
+		if (!config?.sync_token || config?.sync_token.length === 0) {
+			await message(
+				`Auto Sync cannot be enabled without a valid sync token. Please set a sync token in settings and try again.`,
+				{ title: 'FanslySync | Auto Sync Error', kind: 'error' }
+			);
+
+			return;
+		}
+
+		// Enable autosync
+		config!.auto_sync_enabled = !config?.auto_sync_enabled;
+		const [_, saveConfigError] = await awaiter(invoke('save_config', { config }));
+
+		if (saveConfigError) {
+			await message(
+				`Failed to save Auto Sync configuration. Please try again. Error: ${saveConfigError}`,
+				{ title: 'FanslySync | Auto Sync Error', kind: 'error' }
+			);
+			error(
+				`[FanslySync::enableAutoSync] Failed to save Auto Sync configuration. Error: ${saveConfigError}`
+			);
+			return;
+		}
+
+		// Clear interval if autosync is disabled, set if enabled
+		if (config?.auto_sync_enabled) {
+			syncInterval = setInterval(
+				async () => {
+					if (config?.auto_sync_enabled) {
+						info(`[FanslySync::autoSyncProcess] Auto Sync enabled - syncing data automatically.`);
+						const nextIntervalTime = new Date(
+							Date.now() + (config?.sync_interval ?? 1) * 60 * 60 * 1000
+						);
+						const nextIntervalTimeString = nextIntervalTime.toLocaleTimeString();
+						const returnedData = await syncNow(true);
+						if (!returnedData || returnedData === null) {
+							error(`[FanslySync::autoSyncProcess] Failed to sync data automatically.`);
+
+							// Send error notification
+							await sendNotification({
+								title: 'FanslySync: Auto Sync Failed!',
+								body: `An error occurred while syncing data automatically. We will automatically retry at ${nextIntervalTimeString}.`
+							});
+						} else {
+							info(
+								`[FanslySync::autoSyncProcess] Synced data automatically - preparing to send to server.`
+							);
+
+							const [_, uploadErr] = await awaiter(
+								invoke('fansly_upload_auto_sync_data', {
+									token: config?.sync_token,
+									data: returnedData
+								})
+							);
+
+							if (uploadErr) {
+								error(
+									`[FanslySync::autoSyncProcess] Failed to upload data to server. Error: ${uploadErr}`
+								);
+
+								// Send error notification
+								await sendNotification({
+									title: 'FanslySync: Auto Sync Failed!',
+									body: `An error occurred while uploading data to the server. We will automatically retry at ${nextIntervalTimeString}.`
+								});
+
+								return;
+							}
+
+							// Send success notification
+							await sendNotification({
+								title: 'FanslySync: Auto Sync Successful!',
+								body: `Data synced and uploaded successfully. Next sync will occur at ${nextIntervalTimeString}.`
+							});
+						}
+					} else {
+						info(`[FanslySync::autoSyncProcess] Auto Sync disabled - skipping this sync.`);
+					}
+				},
+				(config?.sync_interval ?? 1) * 60 * 60 * 1000
+			);
+
+			// Run a auto sync as soon as it's enabled
+			const returnedData = await syncNow(true);
+			if (!returnedData || returnedData === null) {
+				error(`[FanslySync::autoSyncProcess] Failed to sync data automatically.`);
+				// Disable autosync, resave, and error out on the UI
+				config!.auto_sync_enabled = false;
+				const [_, saveConfigError] = await awaiter(invoke('save_config', { config }));
+
+				if (saveConfigError)
+					toast.error('Failed to save Auto Sync configuration. Please try again.', {
+						duration: 5000
+					});
+
+				toast.error(
+					'Self test of Auto Sync failed (SYNC_ERR). Please check the logs for more details.',
+					{
+						duration: 5000
+					}
+				);
+
+				return;
+			} else {
+				info(
+					`[FanslySync::autoSyncProcess] Synced data automatically - preparing to send to server.`
+				);
+
+				const [_, uploadErr] = await awaiter(
+					invoke('fansly_upload_auto_sync_data', {
+						token: config?.sync_token,
+						data: returnedData
+					})
+				);
+
+				if (uploadErr) {
+					error(
+						`[FanslySync::autoSyncProcess] Failed to upload data to server. Error: ${uploadErr}`
+					);
+
+					// Disable autosync, resave, and error out on the UI
+					config!.auto_sync_enabled = false;
+					const [_, saveConfigError] = await awaiter(invoke('save_config', { config }));
+					if (saveConfigError)
+						toast.error('Failed to save Auto Sync configuration. Please try again.', {
+							duration: 5000
+						});
+
+					toast.error(
+						'Self test of Auto Sync failed (UPLOAD_ERR). Please check the logs for more details.',
+						{
+							duration: 5000
+						}
+					);
+
+					return;
+				}
+			}
+		} else {
+			if (syncInterval) {
+				clearInterval(syncInterval);
+			}
+		}
+
+		info(`[FanslySync::enableAutoSync] Auto Sync configuration saved successfully.`);
+		const nextInterval = new Date(Date.now() + (config?.sync_interval ?? 1) * 60 * 60 * 1000);
+		const nextIntervalString = nextInterval.toLocaleTimeString();
+
+		toast.success(
+			`${
+				config?.auto_sync_enabled ? 'Enabled' : 'Disabled'
+			} Auto Sync successfully. ${config?.auto_sync_enabled ? `The next sync will occur at ${nextIntervalString}.` : ''}`,
+			{
+				duration: 5000
+			}
+		);
+	}
+
+	async function onSyncTokenEntered() {
+		// Check if the sync token is valid
+		autoSyncConfigState.validatingToken = true;
+
+		const [_, tokenError] = await awaiter(
+			invoke('fansly_check_sync_token', { token: autoSyncConfig.syncToken })
+		);
+
+		if (tokenError) {
+			error(`[FanslySync::onSyncTokenEntered] Failed to validate sync token. Error: ${tokenError}`);
+			autoSyncConfigState.validatingToken = false;
+			autoSyncConfigState.tokenValid = false;
+			canSave = false;
+			return;
+		} else {
+			info(`[FanslySync::onSyncTokenEntered] Sync token validated successfully.`);
+			autoSyncConfigState.validatingToken = false;
+			autoSyncConfigState.tokenValid = true;
+			canSave = true;
+		}
+	}
+
+	async function onAutoSyncSave() {
+		// Close the modal
+		isAutoSyncConfigModalOpen = false;
+
+		const savingToast = await toast.loading('Saving Auto Sync configuration...');
+
+		config!.sync_interval = autoSyncConfig.interval;
+		config!.sync_token = autoSyncConfig.syncToken;
+
+		const [_, saveConfigError] = await awaiter(invoke('save_config', { config }));
+
+		if (saveConfigError) {
+			await toast.error('Failed to save Auto Sync configuration. Please try again.', {
+				id: savingToast
+			});
+			error(
+				`[FanslySync::onAutoSyncSave] Failed to save Auto Sync configuration. Error: ${saveConfigError}`
+			);
+			return;
+		} else {
+			info(`[FanslySync::onAutoSyncSave] Auto Sync configuration saved successfully.`);
+			await toast.success('Auto Sync configuration saved successfully.', { id: savingToast });
+		}
+	}
 </script>
 
 <div class="container bg-zinc-800 w-screen h-screen">
-	<!-- Top header, Bambu Connect at the left side, settings icon on the right -->
+	<!-- Create config modal -->
+	{#if isAutoSyncConfigModalOpen}
+		<div
+			class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10"
+			transition:fade={{ duration: 300 }}
+		>
+			<div
+				class="bg-zinc-900 p-4 rounded-lg"
+				in:fly={{ y: 20, duration: 300 }}
+				out:fly={{ y: 20, duration: 200 }}
+			>
+				<h1 class="text-2xl font-bold text-gray-200">Auto Sync Configuration</h1>
+				<p class="text-gray-400 mt-1">
+					Configure the Auto Sync feature here. Please ensure you have a valid sync token set in
+					settings.
+				</p>
+				<div class="flex flex-col mt-2">
+					<label for="syncInterval" class="text-gray-200">Sync Interval (in hours)</label>
+					<input
+						type="number"
+						id="syncInterval"
+						class="bg-zinc-700 text-gray-200 p-2 rounded-lg mt-1"
+						placeholder="Enter sync interval in hours"
+						bind:value={autoSyncConfig.interval}
+						min="1"
+					/>
+					<p class="text-gray-400 mt-1">
+						How often should the app sync data automatically? Please enter a number in hours. The
+						minimum value is 1 hour.
+					</p>
+					<label for="syncToken" class="text-gray-200 mt-2">Sync Token</label>
+					<div class="relative flex items-center">
+						<!-- Sync token input. Check in the input for valid token, x not, question mark empty -->
+						<input
+							type="text"
+							id="syncToken"
+							class="bg-zinc-700 text-gray-200 p-2 rounded-lg mt-1 w-full pr-10"
+							placeholder="Enter sync token"
+							bind:value={autoSyncConfig.syncToken}
+							on:change={onSyncTokenEntered}
+						/>
+						{#if !autoSyncConfigState.validatingToken && autoSyncConfigState.tokenValid}
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="1.5"
+								stroke="currentColor"
+								class="absolute right-2 bottom-2 w-6 h-6 text-green-500"
+							>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+							</svg>
+						{:else if !autoSyncConfigState.validatingToken && !autoSyncConfigState.tokenValid}
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="1.5"
+								stroke="currentColor"
+								class="absolute right-2 bottom-2 w-6 h-6 text-red-500"
+							>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						{:else if autoSyncConfigState.validatingToken}
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="1.5"
+								stroke="currentColor"
+								class="absolute right-2 bottom-2 w-6 h-6 text-gray-400 animate-spin"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+								/>
+							</svg>
+						{/if}
+					</div>
+					<p class="text-gray-400 mt-1">
+						Unfocus (click out of) the input to validate the token. A green checkmark means the
+						token is valid.
+					</p>
+					<div class="flex mt-2">
+						<button
+							class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-all duration-200 ease-in-out"
+							disabled={!canSave}
+							on:click={onAutoSyncSave}
+						>
+							{canSave ? 'Save' : 'Please enter a valid sync token'}
+						</button>
+						<button
+							class="bg-red-500 text-white px-4 py-2 rounded-lg w-full ml-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-600 transition-all duration-200 ease-in-out"
+							on:click={() => {
+								isAutoSyncConfigModalOpen = false;
+							}}
+						>
+							Cancel
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Top header, FanslySync at the left side, settings icon on the right -->
 	<div class="flex justify-between items-center h-16 px-4 bg-zinc-900">
 		<div class="flex items-center">
-			<img src="/fanslySync.png" alt="FanslySynct" class="w-8 h-8" />
+			<img src="/fanslySync.png" alt="FanslySync" class="w-8 h-8" />
 			<h1 class="text-2xl font-bold text-gray-200 ml-2">FanslySync</h1>
 			<span class="text-gray-400 ml-2"
 				>v{versionData.appVersion} (runtime: {versionData.tauriVersion})</span
@@ -240,39 +679,53 @@
 					<!-- Automatic sync card -->
 					<div class="relative">
 						<div class="bg-zinc-700 p-4 rounded-lg">
-							<h1 class="text-xl font-bold text-gray-200">Automatic Sync</h1>
+							<div class="flex items-center space-x-2">
+								<h1 class="text-xl font-bold text-gray-200">Automatic Sync</h1>
+								<!-- Status badge -->
+								<span
+									class={`px-2 py-1 rounded-lg text-xs font-bold ${
+										config?.auto_sync_enabled ? 'bg-green-500' : 'bg-red-500'
+									}`}
+								>
+									{config?.auto_sync_enabled ? 'Enabled' : 'Disabled'}
+								</span>
+							</div>
 							<p class="text-gray-400 mt-1">
-								Sync content automatically every {config?.sync_interval} hours. Please ensure you have
-								a stable internet connection.
+								Sync content automatically every {config?.sync_interval}
+								{(config?.sync_interval ?? 0 > 1) ? 'hour' : 'hours'}. Please ensure you have a
+								stable internet connection.
 							</p>
 							<div class="flex mt-2">
 								<button
-									class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full"
-									on:click={() => console.log('Automatic sync clicked')}
+									class={` text-white px-4 py-2 rounded-lg w-full ${
+										!config?.auto_sync_enabled
+											? 'bg-green-500 hover:bg-green-600'
+											: 'bg-red-500 hover:bg-red-600'
+									} disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ease-in-out`}
+									on:click={enableAutoSync}
+									disabled={syncState.syncing}
 								>
-									Enable
+									{syncState.syncing
+										? 'Sync in progress. Please wait.'
+										: config?.auto_sync_enabled
+											? 'Disable'
+											: 'Enable'}
+									{!syncState.syncing ? 'Auto Sync' : ''}
+								</button>
+								<button
+									class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full ml-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ease-in-out hover:bg-blue-700"
+									on:click={() => {
+										isAutoSyncConfigModalOpen = true;
+									}}
+									disabled={config?.auto_sync_enabled || syncState.syncing}
+								>
+									{syncState.syncing
+										? 'Sync in progress. Please wait.'
+										: config?.auto_sync_enabled
+											? 'Disable Auto Sync To Edit'
+											: 'Edit Auto Sync Configuration'}
 								</button>
 							</div>
-						</div>
-						<div
-							class="absolute top-0 left-0 right-0 bottom-0 bg-white/30 backdrop-blur-sm flex flex-col justify-center items-center rounded-lg"
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="size-10 text-blue-400"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-								/>
-							</svg>
-							<h1 class="text-xl font-bold text-gray-200 ml-2">Automatic Sync is coming soon!</h1>
-							<p class="text-white mt-1">Stay tuned for updates.</p>
 						</div>
 					</div>
 
@@ -285,7 +738,9 @@
 						<div class="flex mt-2">
 							<button
 								class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-all duration-200 ease-in-out"
-								on:click={syncNow}
+								on:click={() => {
+									syncNow(false);
+								}}
 								disabled={syncState.syncing}
 							>
 								{syncState.syncing ? 'Syncing...' : 'Sync Now'}

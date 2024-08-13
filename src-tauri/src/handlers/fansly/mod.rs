@@ -5,6 +5,7 @@ use crate::structs::{
     FanslySubscriptionsResponse, Subscription, SyncDataResponse,
 };
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use serde_json::Value;
 
 pub struct Fansly {
     client: reqwest::Client,
@@ -195,7 +196,73 @@ impl Fansly {
         Ok(format!("https://paste.hep.gg/{}", key))
     }
 
-    pub async fn sync(&self) -> Result<SyncDataResponse, String> {
+    pub async fn upload_auto_sync_data(
+        &self,
+        data: SyncDataResponse,
+        token: String,
+    ) -> Result<(), reqwest::Error> {
+        let url = "http://localhost:5001/sync";
+
+        // Set our content type to application/json
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+
+        // Add our auth token to the headers
+        headers.insert("Authorization", format!("{}", token).parse().unwrap());
+
+        let response = self
+            .client
+            .post(url)
+            .headers(headers)
+            .json(&data)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            eprintln!("[sync::process::upload_auto_sync_data] Failed to upload sync data.");
+            return Err(response.error_for_status().unwrap_err());
+        }
+
+        Ok(())
+    }
+
+    pub async fn check_sync_token(&self, token: String) -> Result<Value, reqwest::Error> {
+        // Check if the token is valid (GET /checkSyncToken with Authorization header)
+        // If it is, return the data back from the API
+        // If it isn't, return an error
+        let url = "http://localhost:5001/checkSyncToken";
+
+        // Set our content type to application/json
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+
+        // Add our auth token to the headers
+        headers.insert("Authorization", format!("{}", token).parse().unwrap());
+
+        let response = self.client.get(url).headers(headers).send().await;
+
+        // If successful, return the data, otherwise return an error
+        match response {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    eprintln!("[sync::process::check_sync_token] Failed to check sync token.");
+                    return Err(response.error_for_status().unwrap_err());
+                }
+
+                let json: serde_json::Value = response.json().await?;
+                Ok(json)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn sync(&self, auto: bool) -> Result<SyncDataResponse, String> {
         // Fetch profile
         println!("[sync::process] Fetching profile...");
         let profile = self.get_profile().await.map_err(|e| e.to_string())?;
@@ -280,20 +347,29 @@ impl Fansly {
         println!("[sync::process] Uploading sync data to paste.hep.gg for processing...");
 
         // Upload sync data to paste.hep.gg
-        let paste_url = self
-            .upload_sync_data(SyncDataResponse {
-                followers: followers.clone(),
-                subscribers: subscribers.clone(),
+        if !auto {
+            let paste_url = self
+                .upload_sync_data(SyncDataResponse {
+                    followers: followers.clone(),
+                    subscribers: subscribers.clone(),
+                    sync_data_url: "".to_string(),
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+
+            // Return JSON of what we fetched
+            Ok(SyncDataResponse {
+                followers,
+                subscribers,
+                sync_data_url: paste_url,
+            })
+        } else {
+            // Return JSON of what we fetched
+            Ok(SyncDataResponse {
+                followers,
+                subscribers,
                 sync_data_url: "".to_string(),
             })
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Return JSON of what we fetched
-        Ok(SyncDataResponse {
-            followers,
-            subscribers,
-            sync_data_url: paste_url,
-        })
+        }
     }
 }

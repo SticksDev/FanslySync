@@ -9,8 +9,12 @@ use std::fs;
 use std::io;
 
 use commands::config::{get_config, init_config, save_config};
-use commands::fansly::{fansly_get_me, fansly_set_token, fansly_sync};
+use commands::fansly::{
+    fansly_check_sync_token, fansly_get_me, fansly_set_token, fansly_sync,
+    fansly_upload_auto_sync_data,
+};
 use commands::utils::quit;
+use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_log::{Target, TargetKind};
 
 fn get_log_path() -> io::Result<String> {
@@ -31,6 +35,10 @@ fn get_log_path() -> io::Result<String> {
 #[tokio::main]
 async fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -55,7 +63,9 @@ async fn main() {
             quit,
             fansly_set_token,
             fansly_get_me,
-            fansly_sync
+            fansly_sync,
+            fansly_upload_auto_sync_data,
+            fansly_check_sync_token
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

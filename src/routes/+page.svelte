@@ -87,8 +87,20 @@
 			info(`[FanslySync::init] Not first run. Setting Fansly token...`);
 			await invoke('fansly_set_token', { token: config.fansly_token });
 			info(`[FanslySync::init] Fansly token set.`);
-			info(`[FanslySync::init] Initialization complete. Redirecting to /home...`);
-			window.location.href = '/home';
+			info(`[FanslySync::init] Checking token validity...`);
+
+			const [valid, validError] = await awaiter(invoke('fansly_get_me'));
+			if (validError) {
+				error(`[FanslySync::init] Token invalid. Redirecting to /setup...`);
+				await message(
+					`Your Fansly token is invalid. Please re-enter your token in the setup page.`,
+					{ title: 'FanslySync | Token Invalid', kind: 'error' }
+				);
+				window.location.href = '/setup';
+			} else {
+				info(`[FanslySync::init] Token valid. Redirecting to /dashboard...`);
+				window.location.href = '/dashboard';
+			}
 		}
 	});
 </script>

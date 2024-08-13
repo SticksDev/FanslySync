@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::structs::{FanslyFollowersResponse, Subscription};
 
-const CURRENT_VERSION: i32 = 1; // Set the current version of the config
+const CURRENT_VERSION: i32 = 2; // Set the current version of the config
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncData {
@@ -18,6 +18,8 @@ pub struct Config {
     pub version: i32, // Add a version field to the config (1, 2, 3, etc.)
     pub is_first_run: bool,
     pub fansly_token: String,
+    pub auto_sync_enabled: bool,
+    pub sync_token: String,
     pub sync_interval: u64,
     pub last_sync: u64,
     pub last_sync_data: SyncData,
@@ -31,6 +33,8 @@ impl Default for Config {
             fansly_token: String::new(), // Fansly token is stored as a string
             sync_interval: 1,            // Every hour - sync interval is interpreted as hours
             last_sync: 0,                // Last sync time is stored as a UNIX timestamp
+            auto_sync_enabled: false,    // Auto sync is disabled by default
+            sync_token: String::new(),   // Sync token is stored as a string
             last_sync_data: SyncData {
                 followers: Vec::new(),
                 subscribers: Vec::new(),
@@ -42,17 +46,89 @@ impl Default for Config {
 impl Config {
     pub fn load_or_create(path: &Path) -> io::Result<Self> {
         if path.exists() {
-            let mut config: Self = serde_json::from_str(std::fs::read_to_string(path)?.as_str())
-                .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Could not parse config file: {}", e),
-                    )
-                })?;
+            let config_result: Result<Self, _> =
+                serde_json::from_str(&std::fs::read_to_string(path)?);
+            let config = match config_result {
+                Ok(config) => config,
+                Err(_) => {
+                    // Load raw JSON and attempt to parse it as a JSON object
+                    let config_raw = std::fs::read_to_string(path)?;
+                    let config_json: serde_json::Value = serde_json::from_str(&config_raw)?;
+
+                    println!("[config::migrate] Migrating config file to latest version...");
+                    println!(
+                        "[config::migrate] [DEBUG] config is_object: {}",
+                        config_json.is_object()
+                    );
+
+                    // Check if the JSON object is valid, if not, return an error
+                    if !config_json.is_object() {
+                        println!(
+                            "[config::migrate] [ERROR] Found invalid JSON object in config file"
+                        );
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Tried to migrate a config file, but found an invalid JSON object",
+                        ));
+                    }
+
+                    // Get the version field from the JSON object
+                    let version = config_json["version"].as_i64().unwrap_or(0) as i32;
+
+                    // Check if the version field is a valid integer, if not, return an error
+                    if version == 0 {
+                        println!(
+                            "[config::migrate] [ERROR] Found invalid version field in config JSON"
+                        );
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Tried to migrate a config file, but found an invalid version field",
+                        ));
+                    }
+
+                    println!(
+                        "[config::migrate] Found version field in config JSON: {}",
+                        version
+                    );
+
+                    // Now create a new Config object and set the version field to the value we found
+                    let mut config = Config::default();
+                    config.version = version;
+
+                    // Retain important fields from the JSON object
+                    config.is_first_run = config_json["is_first_run"].as_bool().unwrap_or(true);
+                    config.fansly_token = config_json["fansly_token"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    config.sync_token =
+                        config_json["sync_token"].as_str().unwrap_or("").to_string();
+                    config.sync_interval =
+                        config_json["sync_interval"].as_i64().unwrap_or(1) as u64;
+
+                    // Run migrations on the config object and save it
+                    config = config.migrate()?;
+                    config.save(path)?;
+
+                    println!(
+                        "[config::migrate] Successfully migrated config file to latest version"
+                    );
+                    // Recursively call load_or_create to load the migrated config
+                    return Config::load_or_create(path);
+                }
+            };
+
             if config.version != CURRENT_VERSION {
-                config = config.migrate()?;
-                config.save(path)?;
+                // Should have been migrated by now, error out because it wasn't
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Config version mismatch: expected {}, got {}. Please try removing the config file and restarting the application.", 
+                        CURRENT_VERSION, config.version
+                    ),
+                ));
             }
+
             Ok(config)
         } else {
             let saved_config = Config::default().save(path);
@@ -66,8 +142,12 @@ impl Config {
         while self.version < CURRENT_VERSION {
             self = match self.version {
                 1 => {
-                    // If we're on version 1, migrate to version 2 (not implemented)
-                    self.version += 1;
+                    // Migrate from version 1 to version 2
+                    self.version = 2;
+                    self.auto_sync_enabled = false;
+                    self.sync_token = String::new();
+                    self.sync_interval = 1;
+
                     self
                 }
                 _ => {

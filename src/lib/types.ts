@@ -2,6 +2,8 @@ export type Config = {
 	version: number;
 	is_first_run: boolean;
 	fansly_token: string;
+	auto_sync_enabled: boolean;
+	sync_token: string;
 	sync_interval: number;
 	last_sync: number;
 	last_sync_data: SyncData;
