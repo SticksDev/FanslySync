@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { info, error } from '@tauri-apps/plugin-log';
 	import { awaiter } from '$lib/utils';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type { Config, SyncData } from '$lib/types';
 	import { fade, fly, slide } from 'svelte/transition';
 	import { sendNotification } from '@tauri-apps/plugin-notification';
@@ -37,7 +37,8 @@
 
 	let autoSyncConfig = {
 		interval: 0,
-		syncToken: ''
+		syncToken: '',
+		didRunInitialValidation: false
 	};
 
 	let autoSyncConfigState = {
@@ -472,7 +473,8 @@
 	}
 
 	async function onAutoSyncSave() {
-		// Close the modal
+		// Close the modal and reset the didRunInitialValidation flag
+		autoSyncConfig.didRunInitialValidation = false;
 		isAutoSyncConfigModalOpen = false;
 
 		const savingToast = await toast.loading('Saving Auto Sync configuration...');
@@ -494,6 +496,31 @@
 			info(`[FanslySync::onAutoSyncSave] Auto Sync configuration saved successfully.`);
 			await toast.success('Auto Sync configuration saved successfully.', { id: savingToast });
 		}
+	}
+
+	// When the component is destroyed, clear the interval
+	onDestroy(() => {
+		info(`[FanslySync::page_destroy:home] onDestroy() called. Cleaning up...`);
+		if (syncInterval) {
+			info(`[FanslySync::page_destroy:home] Clearing autosync interval...`);
+			clearInterval(syncInterval);
+		}
+
+		info(`[FanslySync::page_destroy:home] Cleaning up completed. Goodbye!`);
+	});
+
+	// When we show the modal, run the initial validation
+	$: if (isAutoSyncConfigModalOpen && !autoSyncConfig.didRunInitialValidation) {
+		onSyncTokenEntered();
+		autoSyncConfig.didRunInitialValidation = true;
+	}
+
+	function useDebounce(fn: Function, delay: number) {
+		let timeout: number;
+		return function (...args: any) {
+			clearTimeout(timeout);
+			timeout = setTimeout(() => fn(...args), delay);
+		};
 	}
 </script>
 
@@ -537,7 +564,7 @@
 							class="bg-zinc-700 text-gray-200 p-2 rounded-lg mt-1 w-full pr-10"
 							placeholder="Enter sync token"
 							bind:value={autoSyncConfig.syncToken}
-							on:change={onSyncTokenEntered}
+							on:input={useDebounce(onSyncTokenEntered, 500)}
 						/>
 						{#if !autoSyncConfigState.validatingToken && autoSyncConfigState.tokenValid}
 							<svg
@@ -579,8 +606,9 @@
 						{/if}
 					</div>
 					<p class="text-gray-400 mt-1">
-						Unfocus (click out of) the input to validate the token. A green checkmark means the
-						token is valid.
+						Enter your sync token here. A green tick will be displayed if the token is valid, a red
+						cross if it's invalid, and a spinner if it's validating. Please ensure you have a valid
+						sync token set or automatic sync will not work.
 					</p>
 					<div class="flex mt-2">
 						<button
@@ -594,6 +622,7 @@
 							class="bg-red-500 text-white px-4 py-2 rounded-lg w-full ml-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-600 transition-all duration-200 ease-in-out"
 							on:click={() => {
 								isAutoSyncConfigModalOpen = false;
+								autoSyncConfig.didRunInitialValidation = false;
 							}}
 						>
 							Cancel
@@ -690,6 +719,7 @@
 									{config?.auto_sync_enabled ? 'Enabled' : 'Disabled'}
 								</span>
 							</div>
+
 							<p class="text-gray-400 mt-1">
 								Sync content automatically every {config?.sync_interval}
 								{(config?.sync_interval ?? 0 > 1) ? 'hour' : 'hours'}. Please ensure you have a

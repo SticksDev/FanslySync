@@ -99,7 +99,7 @@
 				window.location.href = '/setup';
 			} else {
 				info(`[FanslySync::init] Token valid. Redirecting to /dashboard...`);
-				window.location.href = '/dashboard';
+				window.location.href = '/home';
 			}
 		}
 	});

@@ -201,7 +201,7 @@ impl Fansly {
         data: SyncDataResponse,
         token: String,
     ) -> Result<(), reqwest::Error> {
-        let url = "http://localhost:5001/sync";
+        let url = "https://botapi.fanslycreatorbot.com/sync";
 
         // Set our content type to application/json
         let mut headers = reqwest::header::HeaderMap::new();
@@ -233,7 +233,7 @@ impl Fansly {
         // Check if the token is valid (GET /checkSyncToken with Authorization header)
         // If it is, return the data back from the API
         // If it isn't, return an error
-        let url = "http://localhost:5001/checkSyncToken";
+        let url = "https://botapi.fanslycreatorbot.com/checkSyncToken";
 
         // Set our content type to application/json
         let mut headers = reqwest::header::HeaderMap::new();
