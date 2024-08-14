@@ -57,6 +57,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           rustup target add x86_64-apple-darwin
+          npm i
           npm ci
           npm run tauri build -- --target x86_64-apple-darwin
           npm run tauri build -- --target aarch64-apple-darwin
@@ -67,6 +68,7 @@ jobs:
       - name: build FanslySync app for Windows, Linux
         if: matrix.os != 'macos-latest'
         run: |
+          npm i
           npm ci
           npm run tauri build
         env:
