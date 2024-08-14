@@ -42,7 +42,7 @@
 		"createUpdaterArtifacts": true
 	},
 	"productName": "FanslySync",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"identifier": "com.fanslycreatorbot.fanslysync",
 	"plugins": {
 		"updater": {
