@@ -81,7 +81,9 @@ impl Fansly {
             println!("[sync::process::get_profile] Got successful response from API.");
         }
 
-        let profile: FanslyBaseResponse<FanslyAccountResponse> = response.json().await?;
+        let profile = response
+            .json::<FanslyBaseResponse<FanslyAccountResponse>>()
+            .await?;
         Ok(profile)
     }
 

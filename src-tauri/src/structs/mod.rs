@@ -105,7 +105,6 @@ pub struct Account {
     pub status_id: i64,
     pub last_seen_at: i64,
     pub post_likes: i64,
-    pub main_wallet: MainWallet,
     pub streaming: Streaming,
     pub account_media_likes: i64,
     pub earnings_wallet: EarningsWallet,
