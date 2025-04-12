@@ -154,15 +154,16 @@ impl Fansly {
         let response = self.client.get(url).headers(headers).send().await?;
 
         if !response.status().is_success() {
-            eprintln!("[fanslySyncExt] No successful response from API. Setting error state.");
+            log::error!("[sync::process::fetch_subscribers] No successful response from API. Setting error state.");
             let error = response.error_for_status().unwrap_err();
             return Err(error);
         }
 
         let subscriptions: FanslyBaseResponse<FanslySubscriptionsResponse> =
             response.json().await?;
-        println!(
-            "[fanslySyncExt] Got {} subscriptions from API.",
+
+        log::info!(
+            "[sync::process::fetch_subscribers] Got {} subscribers from API.",
             subscriptions.response.subscriptions.len()
         );
 
@@ -170,32 +171,37 @@ impl Fansly {
     }
 
     async fn upload_sync_data(&self, data: SyncDataResponse) -> Result<String, reqwest::Error> {
-        let url = "https://paste.hep.gg/documents";
+        let url = "https://paste.fanslycreatorbot.com";
 
-        // Set our content type to application/json
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
-        );
+        // Convert passed data to bytes
+        let json_string = serde_json::to_string(&data).unwrap();
+        let data_as_bytes = json_string.as_bytes();
 
+        let form = reqwest::multipart::Form::new()
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(data_as_bytes.to_vec())
+                    .file_name("sync_data.json")
+                    .mime_str("application/json")?,
+            );
+
+        // Create a new client and POST
         let response = self
             .client
             .post(url)
-            .headers(headers)
-            .json(&data)
+            .multipart(form)
             .send()
             .await?;
 
         if !response.status().is_success() {
-            eprintln!("[sync::process::upload_sync_data] Failed to upload sync data.");
+            log::error!("Failed to upload sync data...");
+            log::info!("Response: {:?}", response);
             return Err(response.error_for_status().unwrap_err());
         }
 
-        let json: serde_json::Value = response.json().await?;
-        let key = json["key"].as_str().unwrap();
-
-        Ok(format!("https://paste.hep.gg/{}", key))
+        let reply = response.text().await?;
+        log::info!("Uploaded sync data successfully. Response: {}", reply);
+        Ok(reply)
     }
 
     pub async fn upload_auto_sync_data(
@@ -224,10 +230,12 @@ impl Fansly {
             .await?;
 
         if !response.status().is_success() {
-            eprintln!("[sync::process::upload_auto_sync_data] Failed to upload sync data.");
+            log::error!("Failed to upload sync data...");
+            log::info!("Response: {:?}", response);
             return Err(response.error_for_status().unwrap_err());
         }
 
+        log::info!("Uploaded sync data successfully.");
         Ok(())
     }
 
@@ -253,7 +261,8 @@ impl Fansly {
         match response {
             Ok(response) => {
                 if !response.status().is_success() {
-                    eprintln!("[sync::process::check_sync_token] Failed to check sync token.");
+                    log::error!("Failed to check sync token...");
+                    log::info!("Response: {:?}", response);
                     return Err(response.error_for_status().unwrap_err());
                 }
 
@@ -266,34 +275,32 @@ impl Fansly {
 
     pub async fn sync(&self, auto: bool) -> Result<SyncDataResponse, String> {
         // Fetch profile
-        println!("[sync::process] Fetching profile...");
+        log::info!("[sync::process] Fetching profile...");
         let profile = self.get_profile().await.map_err(|e| e.to_string())?;
 
         if !profile.success {
             return Err("Failed to fetch profile".to_string());
         }
 
-        println!("[sync::process] Profile retrieved successfully.");
+        log::info!("[sync::process] Syncing profile...");
 
         let account = profile.response.account;
         let total_followers = account.follow_count;
         let total_subscribers = account.subscriber_count;
 
-        println!(
-            "[sync::process] Account {} has {} followers and {} subscribers. Starting sync...",
-            account.id, total_followers, total_subscribers
-        );
+        log::info!("[sync::process] Account ID: {}, Followers: {}, Subscribers: {}",
+            account.id, total_followers, total_subscribers);
 
         let mut followers: Vec<FanslyFollowersResponse> = Vec::new();
         let mut subscribers: Vec<Subscription> = Vec::new();
 
-        println!("[sync::process] Fetching followers and subscribers...");
+        log::info!("[sync::process] Fetching followers...");
 
         // Fetch followers until we have all of them
         let mut offset = 0;
         let mut total_requests = 0;
         while followers.len() < total_followers as usize {
-            println!(
+            log::info!(
                 "[sync::process] Fetching followers for account {} with offset {} (total: {})",
                 account.id, offset, total_followers
             );
@@ -302,7 +309,7 @@ impl Fansly {
                 .await
                 .map_err(|e| e.to_string())?;
 
-            println!(
+            log::info!(
                 "[sync::process] Got {} followers from API.",
                 response.response.len()
             );
@@ -319,7 +326,7 @@ impl Fansly {
         // Fetch subscribers until we have all of them
         offset = 0;
         while subscribers.len() < total_subscribers as usize {
-            println!(
+            log::info!(
                 "[sync::process] Fetching subscribers with offset {} for account {} (total: {})",
                 offset, account.id, total_subscribers
             );
@@ -339,14 +346,14 @@ impl Fansly {
             }
         }
 
-        println!(
+        log::info!(
             "[sync::process] Got {} followers and {} subscribers from API.",
             followers.len(),
             subscribers.len()
         );
 
-        println!("[sync::process] Sync complete.");
-        println!("[sync::process] Uploading sync data to paste.hep.gg for processing...");
+        log::info!("[sync::process] Sync complete.");
+        log::info!("[sync::process] Uploading sync data to paste.hep.gg for processing...");
 
         // Upload sync data to paste.hep.gg
         if !auto {

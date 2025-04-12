@@ -55,15 +55,15 @@ impl Config {
                     let config_raw = std::fs::read_to_string(path)?;
                     let config_json: serde_json::Value = serde_json::from_str(&config_raw)?;
 
-                    println!("[config::migrate] Migrating config file to latest version...");
-                    println!(
+                    log::info!("[config::migrate] Migrating config file to latest version...");
+                    log::debug!(
                         "[config::migrate] [DEBUG] config is_object: {}",
                         config_json.is_object()
                     );
 
                     // Check if the JSON object is valid, if not, return an error
                     if !config_json.is_object() {
-                        println!(
+                        log::error!(
                             "[config::migrate] [ERROR] Found invalid JSON object in config file"
                         );
                         return Err(io::Error::new(
@@ -77,7 +77,7 @@ impl Config {
 
                     // Check if the version field is a valid integer, if not, return an error
                     if version == 0 {
-                        println!(
+                        log::error!(
                             "[config::migrate] [ERROR] Found invalid version field in config JSON"
                         );
                         return Err(io::Error::new(
@@ -86,7 +86,7 @@ impl Config {
                         ));
                     }
 
-                    println!(
+                    log::info!(
                         "[config::migrate] Found version field in config JSON: {}",
                         version
                     );
@@ -110,7 +110,7 @@ impl Config {
                     config = config.migrate()?;
                     config.save(path)?;
 
-                    println!(
+                    log::info!(
                         "[config::migrate] Successfully migrated config file to latest version"
                     );
                     // Recursively call load_or_create to load the migrated config

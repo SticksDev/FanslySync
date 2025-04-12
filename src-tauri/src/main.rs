@@ -39,7 +39,6 @@ async fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -54,6 +53,8 @@ async fn main() {
                     }),
                     Target::new(TargetKind::Webview),
                 ])
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .max_file_size(1024 * 1024 * 5)
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![

@@ -107,7 +107,6 @@ pub struct Account {
     pub post_likes: i64,
     pub streaming: Streaming,
     pub account_media_likes: i64,
-    pub earnings_wallet: EarningsWallet,
     pub subscription_tiers: Vec<SubscriptionTier>,
     pub profile_access: bool,
 }
@@ -154,18 +153,6 @@ pub struct Streaming {
     pub account_id: String,
     pub channel: Value,
     pub enabled: bool,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EarningsWallet {
-    pub id: String,
-    pub account_id: String,
-    pub balance: i64,
-    #[serde(rename = "type")]
-    pub type_field: i64,
-    pub wallet_version: i64,
-    pub flags: i64,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
